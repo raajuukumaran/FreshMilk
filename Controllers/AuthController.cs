@@ -9,14 +9,20 @@ namespace FreshMilk.API.Controllers;
 public class AuthController : ControllerBase
 {
     private readonly IAuthService _authService;
+    private readonly IMsg91SmsService _msg91SmsService;
     private readonly IWebHostEnvironment _environment;
+    private readonly ILogger<AuthController> _logger;
 
     public AuthController(
         IAuthService authService,
-        IWebHostEnvironment environment)
+        IMsg91SmsService msg91SmsService,
+        IWebHostEnvironment environment,
+        ILogger<AuthController> logger)
     {
         _authService = authService;
+        _msg91SmsService = msg91SmsService;
         _environment = environment;
+        _logger = logger;
     }
 
     // POST: api/auth/send-otp
@@ -25,6 +31,17 @@ public class AuthController : ControllerBase
         [FromBody] SendOtpRequest request,
         CancellationToken cancellationToken)
     {
+        if (!_environment.IsDevelopment() && !_msg91SmsService.IsConfigured)
+        {
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new
+                {
+                    success = false,
+                    message = "OTP delivery is temporarily unavailable."
+                });
+        }
+
         var result = await _authService.GenerateOtpAsync(
             request.MobileNumber,
             cancellationToken);
@@ -38,8 +55,6 @@ public class AuthController : ControllerBase
             });
         }
 
-        // Development testing only. Integrate an SMS provider
-        // before using this flow in production.
         if (_environment.IsDevelopment())
         {
             return Ok(new
@@ -50,13 +65,47 @@ public class AuthController : ControllerBase
             });
         }
 
-        return StatusCode(
-            StatusCodes.Status501NotImplemented,
-            new
-            {
-                success = false,
-                message = "SMS delivery is not configured yet."
-            });
+        if (string.IsNullOrWhiteSpace(result.OTP))
+        {
+            _logger.LogError(
+                "OTP generation succeeded without returning an OTP for user {UserId}.",
+                result.UserId);
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                new
+                {
+                    success = false,
+                    message = "Unable to generate an OTP. Please try again."
+                });
+        }
+
+        try
+        {
+            await _msg91SmsService.SendOtpAsync(
+                request.MobileNumber,
+                result.OTP,
+                cancellationToken);
+        }
+        catch (HttpRequestException exception)
+        {
+            _logger.LogError(
+                exception,
+                "MSG91 could not deliver an OTP to user {UserId}.",
+                result.UserId);
+            return StatusCode(
+                StatusCodes.Status502BadGateway,
+                new
+                {
+                    success = false,
+                    message = "OTP delivery failed. Please try again shortly."
+                });
+        }
+
+        return Ok(new
+        {
+            success = true,
+            message = "OTP sent successfully."
+        });
     }
 
     // POST: api/auth/verify-otp

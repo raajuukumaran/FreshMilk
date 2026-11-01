@@ -1,6 +1,8 @@
 using Scalar.AspNetCore;
 using FreshMilk.API;
 using FreshMilk.API.Middleware;
+using FreshMilk.API.Services;
+using FreshMilk.API.Services.Interfaces;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -11,6 +13,10 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 builder.Services.AddFreshMilkDependencies();
+builder.Services.AddHttpClient<IMsg91SmsService, Msg91SmsService>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(15);
+});
 
 // =====================================================
 // 2. CORS CONFIGURATION
