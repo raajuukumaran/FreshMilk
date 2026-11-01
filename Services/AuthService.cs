@@ -31,4 +31,15 @@ public class AuthService : IAuthService
             otp,
             cancellationToken);
     }
+
+    public Task<VerifyOtpResult> LoginWithPasswordAsync(
+        string mobileNumber,
+        string password,
+        CancellationToken cancellationToken)
+    {
+        return _authRepository.LoginWithPasswordAsync(
+            mobileNumber,
+            password,
+            cancellationToken);
+    }
 }

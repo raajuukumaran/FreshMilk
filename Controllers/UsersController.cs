@@ -83,6 +83,15 @@ public class UsersController : ControllerBase
         [FromBody] SaveUserRequest request,
         CancellationToken cancellationToken)
     {
+        if (string.IsNullOrWhiteSpace(request.Password))
+        {
+            return BadRequest(new
+            {
+                success = false,
+                message = "Set a password of at least 8 characters for the new account."
+            });
+        }
+
         try
         {
             var user = await _repository.CreateAsync(

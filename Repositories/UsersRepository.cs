@@ -1,4 +1,5 @@
 using System.Data;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Data.SqlClient;
 using FreshMilk.API.Data;
 using FreshMilk.API.DTOs.Users;
@@ -10,10 +11,14 @@ namespace FreshMilk.API.Repositories;
 public class UsersRepository : IUsersRepository
 {
     private readonly IConfiguration _configuration;
+    private readonly IPasswordHasher<VerifiedUser> _passwordHasher;
 
-    public UsersRepository(IConfiguration configuration)
+    public UsersRepository(
+        IConfiguration configuration,
+        IPasswordHasher<VerifiedUser> passwordHasher)
     {
         _configuration = configuration;
+        _passwordHasher = passwordHasher;
     }
 
     private SqlConnection CreateConnection()
@@ -212,7 +217,17 @@ public class UsersRepository : IUsersRepository
         var users = await QueryUsersAsync(
             "CREATE", null, request, null, false, null, cancellationToken);
 
-        return users.FirstOrDefault();
+        var user = users.FirstOrDefault();
+        if (user is not null && request.Password is not null)
+        {
+            await SavePasswordHashAsync(
+                user.UserId,
+                user.UserRole,
+                request.Password,
+                cancellationToken);
+        }
+
+        return user;
     }
 
     public async Task<UserDto?> UpdateAsync(
@@ -222,7 +237,63 @@ public class UsersRepository : IUsersRepository
         var users = await QueryUsersAsync(
             "UPDATE", id, request, null, false, null, cancellationToken);
 
-        return users.FirstOrDefault();
+        var user = users.FirstOrDefault();
+        if (user is not null && request.Password is not null)
+        {
+            await SavePasswordHashAsync(
+                user.UserId,
+                user.UserRole,
+                request.Password,
+                cancellationToken);
+        }
+
+        return user;
+    }
+
+    private async Task SavePasswordHashAsync(
+        long userId,
+        string? role,
+        string password,
+        CancellationToken cancellationToken)
+    {
+        if (!string.Equals(role, "supplier", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(role, "consumer", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "Passwords can only be set for supplier and consumer accounts.");
+        }
+
+        var user = new VerifiedUser
+        {
+            UserId = checked((int)userId),
+            UserRole = role
+        };
+        var passwordHash = _passwordHasher.HashPassword(user, password);
+
+        await using var connection = CreateConnection();
+        await using var command = new SqlCommand(
+            """
+            UPDATE dbo.Users
+            SET PasswordHash = @PasswordHash
+            OUTPUT INSERTED.UserId
+            WHERE UserId = @UserId
+                AND UserRole IN (N'supplier', N'consumer');
+            """,
+            connection);
+
+        command.Parameters.Add(
+            "@PasswordHash",
+            SqlDbType.NVarChar,
+            500).Value = passwordHash;
+        command.Parameters.Add("@UserId", SqlDbType.BigInt).Value = userId;
+
+        await connection.OpenAsync(cancellationToken);
+        var updatedUserId = await command.ExecuteScalarAsync(cancellationToken);
+        if (updatedUserId is null || updatedUserId is DBNull)
+        {
+            throw new InvalidOperationException(
+                "The password could not be saved for this account.");
+        }
     }
 
     public async Task<bool> SetActiveAsync(

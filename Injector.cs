@@ -2,6 +2,7 @@ using FreshMilk.API.Repositories;
 using FreshMilk.API.Repositories.Interfaces;
 using FreshMilk.API.Services;
 using FreshMilk.API.Services.Interfaces;
+using Microsoft.AspNetCore.Identity;
 
 namespace FreshMilk.API;
 
@@ -10,6 +11,7 @@ public static class Injector
     public static IServiceCollection AddFreshMilkDependencies(
         this IServiceCollection services)
     {
+        services.AddScoped<IPasswordHasher<VerifiedUser>, PasswordHasher<VerifiedUser>>();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IAuthRepository, AuthRepository>();
         services.AddScoped<IUsersRepository, UsersRepository>();

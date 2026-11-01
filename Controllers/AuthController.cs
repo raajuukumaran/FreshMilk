@@ -135,4 +135,31 @@ public class AuthController : ControllerBase
             user = result.User
         });
     }
+
+    [HttpPost("password-login")]
+    public async Task<IActionResult> PasswordLogin(
+        [FromBody] PasswordLoginRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _authService.LoginWithPasswordAsync(
+            request.MobileNumber,
+            request.Password,
+            cancellationToken);
+
+        if (!result.Success)
+        {
+            return Unauthorized(new
+            {
+                success = false,
+                message = result.Message
+            });
+        }
+
+        return Ok(new
+        {
+            success = true,
+            message = result.Message,
+            user = result.User
+        });
+    }
 }

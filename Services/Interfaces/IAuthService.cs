@@ -12,4 +12,9 @@ public interface IAuthService
         string mobileNumber,
         string otp,
         CancellationToken cancellationToken);
+
+    Task<VerifyOtpResult> LoginWithPasswordAsync(
+        string mobileNumber,
+        string password,
+        CancellationToken cancellationToken);
 }

@@ -10,6 +10,11 @@ public interface IAuthRepository
         string mobileNumber,
         string otp,
         CancellationToken cancellationToken);
+
+    Task<VerifyOtpResult> LoginWithPasswordAsync(
+        string mobileNumber,
+        string password,
+        CancellationToken cancellationToken);
 }
 
 public class GenerateOtpResult

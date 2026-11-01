@@ -17,6 +17,11 @@ public class SaveUserRequest
         ErrorMessage = "Enter a valid 10-digit mobile number.")]
     public string PhoneNumber { get; set; } = string.Empty;
 
+    [StringLength(128, MinimumLength = 8)]
+    [RegularExpression(@"^(?=.*\S).+$",
+        ErrorMessage = "Password cannot contain only whitespace.")]
+    public string? Password { get; set; }
+
     [EmailAddress, StringLength(255)]
     public string? Email { get; set; }
 
