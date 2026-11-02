@@ -42,4 +42,17 @@ public class AuthService : IAuthService
             password,
             cancellationToken);
     }
+
+    public Task<bool> ChangePasswordAsync(
+        string mobileNumber,
+        string currentPassword,
+        string newPassword,
+        CancellationToken cancellationToken)
+    {
+        return _authRepository.ChangePasswordAsync(
+            mobileNumber,
+            currentPassword,
+            newPassword,
+            cancellationToken);
+    }
 }

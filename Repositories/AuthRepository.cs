@@ -36,6 +36,20 @@ public class AuthRepository : IAuthRepository
         return new SqlConnection(connectionString);
     }
 
+    private static string? GetOptionalString(SqlDataReader reader, string name)
+    {
+        for (var index = 0; index < reader.FieldCount; index++)
+        {
+            if (string.Equals(
+                reader.GetName(index), name, StringComparison.OrdinalIgnoreCase))
+            {
+                return reader.IsDBNull(index) ? null : reader.GetString(index);
+            }
+        }
+
+        return null;
+    }
+
     // Generate OTP for a registered mobile number
     public async Task<GenerateOtpResult> GenerateOtpAsync(
         string mobileNumber,
@@ -147,7 +161,9 @@ public class AuthRepository : IAuthRepository
 
             UserRole = reader["UserRole"] is DBNull
                 ? null
-                : Convert.ToString(reader["UserRole"])
+                : Convert.ToString(reader["UserRole"]),
+
+            ProfileImageUrl = GetOptionalString(reader, "ProfileImageUrl")
         };
 
         return result;
@@ -166,6 +182,7 @@ public class AuthRepository : IAuthRepository
                 PhoneNumber,
                 FullName,
                 UserRole,
+                ProfileImageUrl,
                 PasswordHash
             FROM dbo.Users
             WHERE PhoneNumber = @MobileNumber
@@ -197,7 +214,8 @@ public class AuthRepository : IAuthRepository
                 UserId = Convert.ToInt32(reader["UserId"]),
                 PhoneNumber = Convert.ToString(reader["PhoneNumber"]),
                 FullName = Convert.ToString(reader["FullName"]),
-                UserRole = Convert.ToString(reader["UserRole"])
+                UserRole = Convert.ToString(reader["UserRole"]),
+                ProfileImageUrl = GetOptionalString(reader, "ProfileImageUrl")
             };
             passwordHash = Convert.ToString(reader["PasswordHash"]);
         }
@@ -250,6 +268,91 @@ public class AuthRepository : IAuthRepository
             Message = "Login successful.",
             User = user
         };
+    }
+
+    public async Task<bool> ChangePasswordAsync(
+        string mobileNumber,
+        string currentPassword,
+        string newPassword,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = CreateConnection();
+        await using var selectCommand = new SqlCommand(
+            """
+            SELECT TOP (1) UserId, UserRole, PasswordHash
+            FROM dbo.Users
+            WHERE PhoneNumber = @MobileNumber
+                AND IsActive = 1
+                AND UserRole IN (N'owner', N'supplier', N'consumer');
+            """,
+            connection);
+        selectCommand.Parameters.Add(
+            "@MobileNumber", SqlDbType.NVarChar, 20).Value = mobileNumber;
+
+        await connection.OpenAsync(cancellationToken);
+
+        int userId;
+        string? role;
+        string? currentHash;
+        VerifiedUser user;
+        await using (var reader =
+            await selectCommand.ExecuteReaderAsync(cancellationToken))
+        {
+            if (!await reader.ReadAsync(cancellationToken) ||
+                reader["PasswordHash"] is DBNull)
+            {
+                return false;
+            }
+
+            userId = Convert.ToInt32(reader["UserId"]);
+            role = Convert.ToString(reader["UserRole"]);
+            currentHash = Convert.ToString(reader["PasswordHash"]);
+            user = new VerifiedUser { UserId = userId, UserRole = role };
+        }
+
+        if (string.IsNullOrWhiteSpace(currentHash))
+        {
+            return false;
+        }
+
+        bool currentPasswordMatches;
+        try
+        {
+            currentPasswordMatches =
+                _passwordHasher.VerifyHashedPassword(
+                    user, currentHash, currentPassword) !=
+                PasswordVerificationResult.Failed;
+        }
+        catch (FormatException)
+        {
+            currentPasswordMatches =
+                MatchesLegacyPassword(currentHash, currentPassword);
+        }
+
+        if (!currentPasswordMatches)
+        {
+            return false;
+        }
+
+        var newHash = _passwordHasher.HashPassword(user, newPassword);
+        await using var updateCommand = new SqlCommand(
+            """
+            UPDATE dbo.Users
+            SET PasswordHash = @NewPasswordHash
+            WHERE UserId = @UserId
+                AND IsActive = 1
+                AND PasswordHash = @CurrentPasswordHash;
+            """,
+            connection);
+        updateCommand.Parameters.Add(
+            "@NewPasswordHash", SqlDbType.NVarChar, 500).Value = newHash;
+        updateCommand.Parameters.Add(
+            "@UserId", SqlDbType.Int).Value = userId;
+        updateCommand.Parameters.Add(
+            "@CurrentPasswordHash", SqlDbType.NVarChar, 500).Value =
+            currentHash;
+
+        return await updateCommand.ExecuteNonQueryAsync(cancellationToken) == 1;
     }
 
     private static bool MatchesLegacyPassword(

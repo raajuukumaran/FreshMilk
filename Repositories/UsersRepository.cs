@@ -305,4 +305,28 @@ public class UsersRepository : IUsersRepository
 
         return users.Count > 0;
     }
+
+    public async Task<bool> UpdateProfileImageUrlAsync(
+        long id,
+        string profileImageUrl,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = CreateConnection();
+        await using var command = new SqlCommand(
+            """
+            UPDATE dbo.Users
+            SET ProfileImageUrl = @ProfileImageUrl,
+                UpdatedAt = SYSUTCDATETIME()
+            WHERE UserId = @UserId
+                AND UserRole IN (N'owner', N'supplier', N'consumer');
+            """,
+            connection);
+        command.Parameters.Add(
+            "@ProfileImageUrl", SqlDbType.NVarChar, 500).Value =
+            profileImageUrl;
+        command.Parameters.Add("@UserId", SqlDbType.BigInt).Value = id;
+
+        await connection.OpenAsync(cancellationToken);
+        return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
+    }
 }

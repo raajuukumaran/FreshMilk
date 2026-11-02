@@ -4,6 +4,9 @@ namespace FreshMilk.API.Models.Chat;
 
 public sealed class ReviewChatRequestRequest
 {
-    [Range(5, 1440)]
-    public int AccessMinutes { get; set; } = 60;
+    [Required]
+    public DateOnly? AccessStartDate { get; set; }
+
+    [Required]
+    public DateOnly? AccessEndDate { get; set; }
 }

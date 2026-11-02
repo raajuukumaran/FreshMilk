@@ -15,6 +15,12 @@ public interface IAuthRepository
         string mobileNumber,
         string password,
         CancellationToken cancellationToken);
+
+    Task<bool> ChangePasswordAsync(
+        string mobileNumber,
+        string currentPassword,
+        string newPassword,
+        CancellationToken cancellationToken);
 }
 
 public class GenerateOtpResult
@@ -38,4 +44,5 @@ public class VerifiedUser
     public string? PhoneNumber { get; set; }
     public string? FullName { get; set; }
     public string? UserRole { get; set; }
+    public string? ProfileImageUrl { get; set; }
 }

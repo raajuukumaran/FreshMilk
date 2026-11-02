@@ -8,6 +8,7 @@ public sealed class ChatThreadResponse
     public string ParticipantRole { get; init; } = "";
     public string ThreadKind { get; init; } = "OWNER";
     public long? RelatedSupplyId { get; init; }
+    public DateTime? AccessStartsAt { get; init; }
     public DateTime? AccessEndsAt { get; init; }
     public bool CanSend { get; init; } = true;
     public string? LastMessage { get; init; }

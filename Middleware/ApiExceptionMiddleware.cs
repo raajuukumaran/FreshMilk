@@ -33,7 +33,8 @@ public sealed class ApiExceptionMiddleware
         }
         catch (SqlException exception) when (
             exception.Number is >= 50200 and <= 50299
-            or >= 50300 and <= 50399)
+            or >= 50300 and <= 50399
+            or >= 50400 and <= 50499)
         {
             _logger.LogWarning(
                 exception,

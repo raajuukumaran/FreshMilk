@@ -9,17 +9,20 @@ namespace FreshMilk.API.Controllers;
 public class AuthController : ControllerBase
 {
     private readonly IAuthService _authService;
+    private readonly ICallAccessTokenService _callAccessTokens;
     private readonly IMsg91SmsService _msg91SmsService;
     private readonly IWebHostEnvironment _environment;
     private readonly ILogger<AuthController> _logger;
 
     public AuthController(
         IAuthService authService,
+        ICallAccessTokenService callAccessTokens,
         IMsg91SmsService msg91SmsService,
         IWebHostEnvironment environment,
         ILogger<AuthController> logger)
     {
         _authService = authService;
+        _callAccessTokens = callAccessTokens;
         _msg91SmsService = msg91SmsService;
         _environment = environment;
         _logger = logger;
@@ -132,6 +135,8 @@ public class AuthController : ControllerBase
         {
             success = true,
             message = result.Message,
+            token = _callAccessTokens.Create(
+                result.User!.UserId, result.User.UserRole),
             user = result.User
         });
     }
@@ -159,7 +164,36 @@ public class AuthController : ControllerBase
         {
             success = true,
             message = result.Message,
+            token = _callAccessTokens.Create(
+                result.User!.UserId, result.User.UserRole),
             user = result.User
+        });
+    }
+
+    [HttpPost("change-password")]
+    public async Task<IActionResult> ChangePassword(
+        [FromBody] ChangePasswordRequest request,
+        CancellationToken cancellationToken)
+    {
+        var changed = await _authService.ChangePasswordAsync(
+            request.MobileNumber,
+            request.CurrentPassword,
+            request.NewPassword,
+            cancellationToken);
+
+        if (!changed)
+        {
+            return BadRequest(new
+            {
+                success = false,
+                message = "Current password is incorrect or the account is inactive."
+            });
+        }
+
+        return Ok(new
+        {
+            success = true,
+            message = "Password changed successfully."
         });
     }
 }

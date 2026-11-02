@@ -12,6 +12,7 @@ public static class Injector
         this IServiceCollection services)
     {
         services.AddScoped<IPasswordHasher<VerifiedUser>, PasswordHasher<VerifiedUser>>();
+        services.AddSingleton<ICallAccessTokenService, CallAccessTokenService>();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IAuthRepository, AuthRepository>();
         services.AddScoped<IUsersRepository, UsersRepository>();
@@ -27,6 +28,7 @@ public static class Injector
         services.AddScoped<IChatService, ChatService>();
         services.AddScoped<IAppNotificationsRepository, AppNotificationsRepository>();
         services.AddScoped<IAppNotificationsService, AppNotificationsService>();
+        services.AddScoped<IExpoPushTokenRepository, ExpoPushTokenRepository>();
         return services;
     }
 }

@@ -103,7 +103,8 @@ public sealed class ChatController : ControllerBase
         CancellationToken ct)
     {
         var reviewed = await _service.ReviewRequestAsync(
-            requestId, true, request.AccessMinutes, actorUserId, actorRole, ct);
+            requestId, true, request.AccessStartDate, request.AccessEndDate,
+            actorUserId, actorRole, ct);
         return reviewed is null
             ? NotFound(ApiResponse<ChatAccessRequestResponse>.Fail("Pending chat request not found."))
             : Ok(ApiResponse<ChatAccessRequestResponse>.Ok(reviewed, "Chat request approved."));
@@ -117,7 +118,7 @@ public sealed class ChatController : ControllerBase
         CancellationToken ct)
     {
         var reviewed = await _service.ReviewRequestAsync(
-            requestId, false, 60, actorUserId, actorRole, ct);
+            requestId, false, null, null, actorUserId, actorRole, ct);
         return reviewed is null
             ? NotFound(ApiResponse<ChatAccessRequestResponse>.Fail("Pending chat request not found."))
             : Ok(ApiResponse<ChatAccessRequestResponse>.Ok(reviewed, "Chat request declined."));

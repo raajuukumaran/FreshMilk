@@ -70,6 +70,7 @@ public sealed class ChatRepository : IChatRepository
         ParticipantRole = reader.GetString(reader.GetOrdinal("ParticipantRole")),
         ThreadKind = reader.GetString(reader.GetOrdinal("ThreadKind")),
         RelatedSupplyId = ReadNullableLong(reader, "RelatedSupplyId"),
+        AccessStartsAt = ReadNullableDateTimeIfPresent(reader, "AccessStartsAt"),
         AccessEndsAt = ReadNullableDateTimeIfPresent(reader, "AccessEndsAt"),
         CanSend = reader.GetBoolean(reader.GetOrdinal("CanSend")),
         LastMessage = reader.IsDBNull(reader.GetOrdinal("LastMessage"))
@@ -136,6 +137,7 @@ public sealed class ChatRepository : IChatRepository
         TargetName = reader.GetString(reader.GetOrdinal("TargetName")),
         TargetRole = reader.GetString(reader.GetOrdinal("TargetRole")),
         RelatedSupplyId = ReadNullableLong(reader, "RelatedSupplyId"),
+        AccessStartsAt = ReadNullableDateTimeIfPresent(reader, "AccessStartsAt"),
         AccessEndsAt = ReadNullableDateTimeIfPresent(reader, "AccessEndsAt"),
         RequestNote = reader.IsDBNull(reader.GetOrdinal("RequestNote"))
             ? null : reader.GetString(reader.GetOrdinal("RequestNote")),
@@ -150,7 +152,7 @@ public sealed class ChatRepository : IChatRepository
         SqlConnection connection, string action,
         long actorUserId, string actorRole,
         long? requestId = null, RequestChatAccessRequest? request = null,
-        int accessMinutes = 60)
+        DateOnly? accessStartDate = null, DateOnly? accessEndDate = null)
     {
         var command = new SqlCommand(StoredProcedure.Chat.ManageRequests, connection)
         {
@@ -169,18 +171,26 @@ public sealed class ChatRepository : IChatRepository
             (object?)request?.RelatedSupplyId ?? DBNull.Value;
         command.Parameters.Add("@RequestNote", SqlDbType.NVarChar, 500).Value =
             (object?)request?.RequestNote ?? DBNull.Value;
-        command.Parameters.Add("@AccessMinutes", SqlDbType.Int).Value = accessMinutes;
+        command.Parameters.Add("@AccessStartDate", SqlDbType.Date).Value =
+            accessStartDate.HasValue
+                ? accessStartDate.Value.ToDateTime(TimeOnly.MinValue)
+                : DBNull.Value;
+        command.Parameters.Add("@AccessEndDate", SqlDbType.Date).Value =
+            accessEndDate.HasValue
+                ? accessEndDate.Value.ToDateTime(TimeOnly.MinValue)
+                : DBNull.Value;
         return command;
     }
 
     private async Task<List<ChatAccessRequestResponse>> QueryRequestsAsync(
         string action, long actorUserId, string actorRole, CancellationToken ct,
         long? requestId = null, RequestChatAccessRequest? request = null,
-        int accessMinutes = 60)
+        DateOnly? accessStartDate = null, DateOnly? accessEndDate = null)
     {
         await using var connection = new SqlConnection(_connectionString);
         await using var command = CreateRequestCommand(
-            connection, action, actorUserId, actorRole, requestId, request, accessMinutes);
+            connection, action, actorUserId, actorRole, requestId, request,
+            accessStartDate, accessEndDate);
         await connection.OpenAsync(ct);
         await using var reader = await command.ExecuteReaderAsync(ct);
         var rows = new List<ChatAccessRequestResponse>();
@@ -216,12 +226,14 @@ public sealed class ChatRepository : IChatRepository
             actorUserId, actorRole, ct, requestId: requestId)).FirstOrDefault();
 
     public async Task<ChatAccessRequestResponse?> ReviewRequestAsync(
-        long requestId, bool approve, int accessMinutes,
+        long requestId, bool approve, DateOnly? accessStartDate,
+        DateOnly? accessEndDate,
         long actorUserId, string actorRole,
         CancellationToken ct) =>
         (await QueryRequestsAsync(approve ? "APPROVE" : "REJECT",
             actorUserId, actorRole, ct, requestId: requestId,
-            accessMinutes: accessMinutes)).FirstOrDefault();
+            accessStartDate: accessStartDate,
+            accessEndDate: accessEndDate)).FirstOrDefault();
 
     public Task<List<ChatMessageResponse>> GetMessagesAsync(
         long actorUserId, string actorRole, long threadId, CancellationToken ct) =>

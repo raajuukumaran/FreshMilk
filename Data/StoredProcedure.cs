@@ -34,6 +34,7 @@ public static class Chat
 public static class Notifications
 {
     public const string Manage = "dbo.ManageAppNotifications";
+    public const string ManagePushTokens = "dbo.ManageExpoPushTokens";
 }
  public static class ConsumerOrders
     {

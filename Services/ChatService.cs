@@ -164,18 +164,26 @@ public sealed class ChatService : IChatService
     }
 
     public async Task<ChatAccessRequestResponse?> ReviewRequestAsync(
-        long requestId, bool approve, int accessMinutes,
+        long requestId, bool approve, DateOnly? accessStartDate,
+        DateOnly? accessEndDate,
         long actorUserId, string actorRole,
         CancellationToken ct)
     {
         if (ValidateActor(actorUserId, actorRole) != "OWNER")
             throw new ArgumentException("Only an owner can review chat requests.");
         if (requestId <= 0) throw new ArgumentException("Invalid chat request ID.");
-        if (approve && (accessMinutes < 5 || accessMinutes > 1440))
-            throw new ArgumentException("Peer chat access must be between 5 minutes and 24 hours.");
+        if (approve && (!accessStartDate.HasValue || !accessEndDate.HasValue))
+            throw new ArgumentException("Choose both the chat access start and end dates.");
+        if (approve && accessStartDate.HasValue &&
+            accessStartDate.Value < DateOnly.FromDateTime(DateTime.Today))
+            throw new ArgumentException("Chat access cannot start in the past.");
+        if (approve && accessStartDate.HasValue && accessEndDate.HasValue &&
+            accessEndDate.Value < accessStartDate.Value)
+            throw new ArgumentException("The chat access end date must be on or after the start date.");
 
         var reviewed = await _repository.ReviewRequestAsync(
-            requestId, approve, accessMinutes, actorUserId, "OWNER", ct);
+            requestId, approve, accessStartDate, accessEndDate,
+            actorUserId, "OWNER", ct);
         if (reviewed is null) return null;
 
         var isExtension = ChatRequestLabels.IsExtension(reviewed.RequestNote);

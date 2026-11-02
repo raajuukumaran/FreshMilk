@@ -17,4 +17,10 @@ public interface IAuthService
         string mobileNumber,
         string password,
         CancellationToken cancellationToken);
+
+    Task<bool> ChangePasswordAsync(
+        string mobileNumber,
+        string currentPassword,
+        string newPassword,
+        CancellationToken cancellationToken);
 }

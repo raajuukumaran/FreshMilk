@@ -193,3 +193,101 @@ BEGIN
     THROW 50307, 'Invalid notification action.', 1;
 END;
 GO
+
+IF OBJECT_ID(N'dbo.ExpoPushTokens', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.ExpoPushTokens
+    (
+        ExpoPushToken NVARCHAR(255) NOT NULL
+            CONSTRAINT PK_ExpoPushTokens PRIMARY KEY,
+        UserId BIGINT NOT NULL,
+        UserRole NVARCHAR(20) NOT NULL,
+        UpdatedAt DATETIME2(0) NOT NULL
+            CONSTRAINT DF_ExpoPushTokens_UpdatedAt DEFAULT (SYSDATETIME()),
+        CONSTRAINT FK_ExpoPushTokens_User
+            FOREIGN KEY (UserId) REFERENCES dbo.Users(UserId)
+    );
+END;
+GO
+
+IF NOT EXISTS
+(
+    SELECT 1 FROM sys.indexes
+    WHERE object_id = OBJECT_ID(N'dbo.ExpoPushTokens')
+      AND name = N'IX_ExpoPushTokens_User'
+)
+    CREATE INDEX IX_ExpoPushTokens_User
+        ON dbo.ExpoPushTokens(UserId, UserRole);
+GO
+
+CREATE OR ALTER PROCEDURE dbo.ManageExpoPushTokens
+    @Action NVARCHAR(20),
+    @ActorUserId BIGINT,
+    @ActorRole NVARCHAR(20),
+    @ExpoPushToken NVARCHAR(255) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    SET @Action = UPPER(LTRIM(RTRIM(COALESCE(@Action, N''))));
+    SET @ActorRole = UPPER(LTRIM(RTRIM(COALESCE(@ActorRole, N''))));
+
+    IF @ActorUserId IS NULL OR @ActorUserId <= 0
+        THROW 50400, 'A valid actor user ID is required.', 1;
+    IF @ActorRole NOT IN (N'OWNER', N'SUPPLIER', N'CONSUMER')
+        THROW 50401, 'Role must be Owner, Supplier, or Consumer.', 1;
+    IF NOT EXISTS
+    (
+        SELECT 1 FROM dbo.Users
+        WHERE UserId = @ActorUserId
+          AND IsActive = 1
+          AND UPPER(LTRIM(RTRIM(UserRole))) = @ActorRole
+    )
+        THROW 50402, 'Active user not found or role mismatch.', 1;
+
+    IF @Action = N'GETMINE'
+    BEGIN
+        SELECT ExpoPushToken
+        FROM dbo.ExpoPushTokens
+        WHERE UserId = @ActorUserId AND UserRole = @ActorRole;
+        RETURN;
+    END;
+
+    IF @Action IN (N'REGISTER', N'UNREGISTER')
+    BEGIN
+        IF NULLIF(LTRIM(RTRIM(@ExpoPushToken)), N'') IS NULL
+            THROW 50403, 'An Expo push token is required.', 1;
+
+        IF @Action = N'REGISTER'
+        BEGIN
+            BEGIN TRANSACTION;
+            UPDATE dbo.ExpoPushTokens WITH (UPDLOCK, SERIALIZABLE)
+            SET UserId = @ActorUserId,
+                UserRole = @ActorRole,
+                UpdatedAt = SYSDATETIME()
+            WHERE ExpoPushToken = @ExpoPushToken;
+
+            IF @@ROWCOUNT = 0
+            BEGIN
+                INSERT INTO dbo.ExpoPushTokens
+                    (ExpoPushToken, UserId, UserRole)
+                VALUES
+                    (@ExpoPushToken, @ActorUserId, @ActorRole);
+            END;
+            COMMIT TRANSACTION;
+
+            SELECT @ExpoPushToken AS ExpoPushToken;
+            RETURN;
+        END;
+
+        DELETE FROM dbo.ExpoPushTokens
+        WHERE ExpoPushToken = @ExpoPushToken
+          AND UserId = @ActorUserId
+          AND UserRole = @ActorRole;
+        RETURN;
+    END;
+
+    THROW 50404, 'Invalid Expo push token action.', 1;
+END;
+GO

@@ -24,7 +24,8 @@ public interface IChatService
         CancellationToken ct);
 
     Task<ChatAccessRequestResponse?> ReviewRequestAsync(
-        long requestId, bool approve, int accessMinutes,
+        long requestId, bool approve, DateOnly? accessStartDate,
+        DateOnly? accessEndDate,
         long actorUserId, string actorRole,
         CancellationToken ct);
 

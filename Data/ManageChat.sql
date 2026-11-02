@@ -37,6 +37,7 @@ BEGIN
         IsOwnerApproved BIT NOT NULL
             CONSTRAINT DF_ChatThreads_IsOwnerApproved DEFAULT (1),
         RelatedSupplyId BIGINT NULL,
+        AccessStartsAt DATETIME2(0) NULL,
         AccessEndsAt DATETIME2(0) NULL,
         CreatedAt DATETIME2(0) NOT NULL
             CONSTRAINT DF_ChatThreads_CreatedAt DEFAULT (SYSDATETIME()),
@@ -68,6 +69,8 @@ IF COL_LENGTH(N'dbo.ChatThreads', N'IsOwnerApproved') IS NULL
         CONSTRAINT DF_ChatThreads_IsOwnerApproved DEFAULT (1);
 IF COL_LENGTH(N'dbo.ChatThreads', N'RelatedSupplyId') IS NULL
     ALTER TABLE dbo.ChatThreads ADD RelatedSupplyId BIGINT NULL;
+IF COL_LENGTH(N'dbo.ChatThreads', N'AccessStartsAt') IS NULL
+    ALTER TABLE dbo.ChatThreads ADD AccessStartsAt DATETIME2(0) NULL;
 IF COL_LENGTH(N'dbo.ChatThreads', N'AccessEndsAt') IS NULL
     ALTER TABLE dbo.ChatThreads ADD AccessEndsAt DATETIME2(0) NULL;
 GO
@@ -303,10 +306,19 @@ BEGIN
             END AS ParticipantRole,
             t.ThreadKind,
             t.RelatedSupplyId,
+            t.AccessStartsAt,
             t.AccessEndsAt,
             CONVERT(BIT, CASE
                 WHEN @ActorUserId IN (t.RequesterUserId, t.ParticipantUserId)
-                 AND (t.ThreadKind = N'OWNER' OR t.AccessEndsAt > SYSDATETIME())
+                 AND
+                 (
+                     t.ThreadKind = N'OWNER'
+                     OR
+                     (
+                         (t.AccessStartsAt IS NULL OR t.AccessStartsAt <= SYSDATETIME())
+                         AND t.AccessEndsAt > SYSDATETIME()
+                     )
+                 )
                     THEN 1 ELSE 0 END) AS CanSend,
             lastMessage.MessageText AS LastMessage,
             lastMessage.CreatedAt AS LastMessageAt,
@@ -430,12 +442,14 @@ BEGIN
                 DECLARE @RequesterUserId BIGINT;
                 DECLARE @ParticipantId BIGINT;
                 DECLARE @ThreadKind NVARCHAR(20);
+                DECLARE @AccessStartsAt DATETIME2(0);
                 DECLARE @AccessEndsAt DATETIME2(0);
         SELECT
             @OwnerUserId = OwnerUserId,
                         @RequesterUserId = RequesterUserId,
                         @ParticipantId = ParticipantUserId,
                         @ThreadKind = ThreadKind,
+                        @AccessStartsAt = AccessStartsAt,
                         @AccessEndsAt = AccessEndsAt
         FROM dbo.ChatThreads
         WHERE ThreadId = @ThreadId
@@ -499,8 +513,13 @@ BEGIN
             THROW 50211, 'Owners can review peer conversations but cannot send as a participant.', 1;
 
         IF @ThreadKind = N'PEER'
-           AND (@AccessEndsAt IS NULL OR @AccessEndsAt <= SYSDATETIME())
-            THROW 50233, 'The owner-approved chat window has expired.', 1;
+           AND
+           (
+               (@AccessStartsAt IS NOT NULL AND @AccessStartsAt > SYSDATETIME())
+               OR @AccessEndsAt IS NULL
+               OR @AccessEndsAt <= SYSDATETIME()
+           )
+            THROW 50233, 'The owner-approved chat window is not currently active.', 1;
 
         IF @ActorUserId = @RequesterUserId
             SET @ParticipantUserId = @ParticipantId;
@@ -549,7 +568,8 @@ CREATE OR ALTER PROCEDURE dbo.ManageChatRequests
     @TargetRole NVARCHAR(20) = NULL,
     @RelatedSupplyId BIGINT = NULL,
     @RequestNote NVARCHAR(500) = NULL,
-    @AccessMinutes INT = 60
+    @AccessStartDate DATE = NULL,
+    @AccessEndDate DATE = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -585,6 +605,7 @@ BEGIN
             target.FullName AS TargetName,
             r.TargetRole,
             r.RelatedSupplyId,
+            thread.AccessStartsAt,
             thread.AccessEndsAt,
             r.RequestNote,
             r.RequestStatus,
@@ -628,13 +649,15 @@ BEGIN
             SELECT 1 FROM dbo.ChatThreads
             WHERE IsOwnerApproved = 1
               AND ISNULL(RelatedSupplyId, 0) = ISNULL(@RelatedSupplyId, 0)
-                            AND (ThreadKind <> N'PEER' OR AccessEndsAt > SYSDATETIME())
+              AND (ThreadKind <> N'PEER' OR AccessEndsAt > SYSDATETIME())
               AND
               (
                   (RequesterUserId = @ActorUserId AND ParticipantUserId = @TargetUserId)
                   OR (RequesterUserId = @TargetUserId AND ParticipantUserId = @ActorUserId)
               )
         )
+           AND UPPER(LTRIM(RTRIM(COALESCE(@RequestNote, N''))))
+               NOT LIKE N'ACCESS EXTENSION REQUESTED.%'
             THROW 50227, 'An approved conversation already exists for these users.', 1;
 
         DECLARE @PendingRequestId BIGINT;
@@ -671,6 +694,7 @@ BEGIN
             target.FullName AS TargetName,
             r.TargetRole,
             r.RelatedSupplyId,
+            thread.AccessStartsAt,
             thread.AccessEndsAt,
             r.RequestNote,
             r.RequestStatus,
@@ -713,6 +737,7 @@ BEGIN
             target.FullName AS TargetName,
             r.TargetRole,
             r.RelatedSupplyId,
+            thread.AccessStartsAt,
             thread.AccessEndsAt,
             r.RequestNote,
             r.RequestStatus,
@@ -762,9 +787,15 @@ BEGIN
 
             IF @Action = N'APPROVE'
             BEGIN
-                    IF @RequestedTargetRole <> N'OWNER'
-                       AND (@AccessMinutes IS NULL OR @AccessMinutes < 5 OR @AccessMinutes > 1440)
-                        THROW 50232, 'Peer chat approval must be between 5 minutes and 24 hours.', 1;
+                IF @RequestedTargetRole <> N'OWNER'
+                   AND
+                   (
+                       @AccessStartDate IS NULL
+                       OR @AccessEndDate IS NULL
+                       OR @AccessStartDate < CONVERT(DATE, SYSDATETIME())
+                       OR @AccessEndDate < @AccessStartDate
+                   )
+                    THROW 50232, 'Choose a valid chat access date range starting today or later.', 1;
 
                 SELECT TOP (1) @LinkedThreadId = ThreadId
                 FROM dbo.ChatThreads WITH (UPDLOCK, HOLDLOCK)
@@ -782,16 +813,18 @@ BEGIN
                     (
                         OwnerUserId, RequesterUserId, RequesterRole,
                         ParticipantUserId, ParticipantRole, ThreadKind,
-                        IsOwnerApproved, RelatedSupplyId, AccessEndsAt
+                        IsOwnerApproved, RelatedSupplyId, AccessStartsAt, AccessEndsAt
                     )
                     VALUES
                     (
                         @ActorUserId, @RequesterId, @RequesterRole,
                         @RequestedTargetId, @RequestedTargetRole,
                         CASE WHEN @RequestedTargetRole = N'OWNER' THEN N'OWNER' ELSE N'PEER' END,
-                            1, @RequestedSupplyId,
-                            CASE WHEN @RequestedTargetRole = N'OWNER' THEN NULL
-                                ELSE DATEADD(MINUTE, @AccessMinutes, SYSDATETIME()) END
+                        1, @RequestedSupplyId,
+                        CASE WHEN @RequestedTargetRole = N'OWNER' THEN NULL
+                            ELSE CONVERT(DATETIME2(0), @AccessStartDate) END,
+                        CASE WHEN @RequestedTargetRole = N'OWNER' THEN NULL
+                            ELSE DATEADD(DAY, 1, CONVERT(DATETIME2(0), @AccessEndDate)) END
                     );
                     SET @LinkedThreadId = CONVERT(BIGINT, SCOPE_IDENTITY());
                 END;
@@ -799,7 +832,8 @@ BEGIN
                 IF @RequestedTargetRole <> N'OWNER'
                 BEGIN
                     UPDATE dbo.ChatThreads
-                    SET AccessEndsAt = DATEADD(MINUTE, @AccessMinutes, SYSDATETIME()),
+                    SET AccessStartsAt = CONVERT(DATETIME2(0), @AccessStartDate),
+                        AccessEndsAt = DATEADD(DAY, 1, CONVERT(DATETIME2(0), @AccessEndDate)),
                         UpdatedAt = SYSDATETIME()
                     WHERE ThreadId = @LinkedThreadId
                       AND ThreadKind = N'PEER';
@@ -831,6 +865,7 @@ BEGIN
             target.FullName AS TargetName,
             r.TargetRole,
             r.RelatedSupplyId,
+            thread.AccessStartsAt,
             thread.AccessEndsAt,
             r.RequestNote,
             r.RequestStatus,

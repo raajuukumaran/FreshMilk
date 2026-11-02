@@ -3,6 +3,9 @@ using FreshMilk.API;
 using FreshMilk.API.Middleware;
 using FreshMilk.API.Services;
 using FreshMilk.API.Services.Interfaces;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Extensions.FileProviders;
+using FreshMilk.API.Hubs;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -12,10 +15,17 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
+builder.Services.AddSignalR();
+builder.Services.AddDataProtection()
+    .SetApplicationName("FreshMilk.API");
 builder.Services.AddFreshMilkDependencies();
 builder.Services.AddHttpClient<IMsg91SmsService, Msg91SmsService>(client =>
 {
     client.Timeout = TimeSpan.FromSeconds(15);
+});
+builder.Services.AddHttpClient<IExpoPushService, ExpoPushService>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(8);
 });
 
 // =====================================================
@@ -38,6 +48,11 @@ builder.Services.AddCors(options =>
 // =====================================================
 
 var app = builder.Build();
+
+var profileImageDirectory =
+    builder.Configuration["ProfileImages:Directory"] ??
+    Path.Combine(app.Environment.ContentRootPath, "wwwroot", "profile-images");
+Directory.CreateDirectory(profileImageDirectory);
 
 // =====================================================
 // 10. OPENAPI AND SCALAR
@@ -66,6 +81,11 @@ app.MapGet("/", () => new
 app.UseCors("FreshMilkCors");
 
 app.UseHttpsRedirection();
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new PhysicalFileProvider(profileImageDirectory),
+    RequestPath = "/profile-images"
+});
 
 app.UseMiddleware<ApiExceptionMiddleware>();
 
@@ -76,6 +96,7 @@ app.UseAuthorization();
 // =====================================================
 
 app.MapControllers();
+app.MapHub<ChatCallHub>("/hubs/calls");
 
 // =====================================================
 // 14. RUN APPLICATION

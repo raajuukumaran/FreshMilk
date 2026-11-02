@@ -2,15 +2,25 @@ using FreshMilk.API.Models.Notifications;
 using FreshMilk.API.Repositories.Interfaces;
 using FreshMilk.API.Responses.Notifications;
 using FreshMilk.API.Services.Interfaces;
+using Microsoft.Data.SqlClient;
 
 namespace FreshMilk.API.Services;
 
 public sealed class AppNotificationsService : IAppNotificationsService
 {
     private readonly IAppNotificationsRepository _repository;
+    private readonly IExpoPushService _push;
+    private readonly ILogger<AppNotificationsService> _logger;
 
-    public AppNotificationsService(IAppNotificationsRepository repository) =>
+    public AppNotificationsService(
+        IAppNotificationsRepository repository,
+        IExpoPushService push,
+        ILogger<AppNotificationsService> logger)
+    {
         _repository = repository;
+        _push = push;
+        _logger = logger;
+    }
 
     private static string ValidateActor(long actorUserId, string actorRole)
     {
@@ -25,7 +35,7 @@ public sealed class AppNotificationsService : IAppNotificationsService
         long actorUserId, string actorRole, CancellationToken ct) =>
         _repository.GetMineAsync(actorUserId, ValidateActor(actorUserId, actorRole), ct);
 
-    public Task<AppNotificationResponse?> CreateAsync(
+    public async Task<AppNotificationResponse?> CreateAsync(
         CreateAppNotificationRequest request,
         long actorUserId, string actorRole, CancellationToken ct)
     {
@@ -38,7 +48,35 @@ public sealed class AppNotificationsService : IAppNotificationsService
             throw new ArgumentException("Notification title is required and limited to 120 characters.");
         if (string.IsNullOrWhiteSpace(request.Body) || request.Body.Length > 500)
             throw new ArgumentException("Notification body is required and limited to 500 characters.");
-        return _repository.CreateAsync(request, actorUserId, role, ct);
+        var created = await _repository.CreateAsync(request, actorUserId, role, ct);
+        if (created is not null)
+        {
+            try
+            {
+                await _push.SendAsync(created, request.ToRole, ct);
+            }
+            catch (SqlException exception)
+            {
+                _logger.LogError(
+                    exception,
+                    "Push delivery setup failed for notification {NotificationId}.",
+                    created.NotificationId);
+            }
+            catch (HttpRequestException exception)
+            {
+                _logger.LogWarning(
+                    exception,
+                    "Push delivery failed for notification {NotificationId}.",
+                    created.NotificationId);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(
+                    "Push delivery timed out for notification {NotificationId}.",
+                    created.NotificationId);
+            }
+        }
+        return created;
     }
 
     public Task<int> MarkReadAsync(

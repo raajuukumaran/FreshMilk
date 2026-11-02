@@ -10,6 +10,7 @@ public sealed class ChatAccessRequestResponse
     public string TargetName { get; init; } = "";
     public string TargetRole { get; init; } = "";
     public long? RelatedSupplyId { get; init; }
+    public DateTime? AccessStartsAt { get; init; }
     public DateTime? AccessEndsAt { get; init; }
     public string? RequestNote { get; init; }
     public string RequestStatus { get; init; } = "";

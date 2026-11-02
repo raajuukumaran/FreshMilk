@@ -28,4 +28,9 @@ public interface IUsersRepository
         long id,
         bool isActive,
         CancellationToken cancellationToken);
+
+    Task<bool> UpdateProfileImageUrlAsync(
+        long id,
+        string profileImageUrl,
+        CancellationToken cancellationToken);
 }
